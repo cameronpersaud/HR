@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pulse">
+<meta name="theme-color" content="#141012">
+<title>Fingertip Pulse</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#f6f3f3; --fg:#1d1517; --muted:#76696c; --line:#e3dadc; --card:#fff;
+  --accent:#c2253f; --ok:#2f7d55;
+  --display:"Fraunces",Georgia,serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{--bg:#141012;--fg:#f2eaec;--muted:#9a8c90;--line:#2c2326;--card:#1e181a;--accent:#ff5470;--ok:#5cc28c;color-scheme:dark}}
+[hidden]{display:none!important}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,system-ui,sans-serif;
+  padding:max(20px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(24px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));
+  display:flex;flex-direction:column;align-items:center}
+main{width:100%;max-width:440px;display:flex;flex-direction:column;gap:18px}
+.label{font:500 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.top{display:flex;justify-content:space-between;align-items:flex-end;gap:12px}
+.readout{display:flex;align-items:baseline;gap:10px}
+#bpm{font:600 104px/1 var(--display);font-variant-numeric:tabular-nums;letter-spacing:-.03em}
+#bpm.idle{color:var(--line)}
+.unit{font:500 16px var(--mono);color:var(--muted)}
+.heart{width:16px;height:16px;background:var(--accent);border-radius:50%;opacity:.2;transition:opacity .08s,transform .08s}
+.heart.beat{opacity:1;transform:scale(1.35)}
+/* The preview must be genuinely visible: iOS stops decoding hidden or 1px videos, which made every frame black */
+#v{width:72px;height:72px;border-radius:50%;object-fit:cover;background:var(--line);flex:0 0 auto;border:2px solid var(--line)}
+canvas{width:100%;height:140px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);display:block}
+#status{font:14px var(--mono);min-height:2.6em}
+#status.ok{color:var(--ok)} #status.warn{color:var(--accent)}
+.meter{height:4px;background:var(--line);border-radius:2px;overflow:hidden}
+.meter i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
+.row{display:flex;gap:10px}
+button{font:600 17px -apple-system,system-ui,sans-serif;padding:16px;border:0;border-radius:14px;background:var(--accent);color:#fff;cursor:pointer;flex:1}
+button.ghost{background:transparent;color:var(--fg);border:1px solid var(--line);flex:0 0 auto;padding:16px 18px}
+button.ghost[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+button:disabled{opacity:.4}
+button:focus-visible{outline:3px solid var(--fg);outline-offset:2px}
+.how{color:var(--muted);font-size:13.5px;margin:0;padding-left:18px}
+.stats{display:flex;flex-wrap:wrap;gap:8px 22px;font:13px var(--mono);color:var(--muted)}
+.stats b{color:var(--fg);font-weight:500}
+details{font:12px var(--mono);color:var(--muted);border-top:1px solid var(--line);padding-top:10px}
+summary{cursor:pointer}
+#diag{white-space:pre-wrap;word-break:break-word;margin:8px 0 0;-webkit-user-select:text;user-select:text}
+#sheet{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center;z-index:5;
+  padding:0 max(12px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left))}
+.card{background:var(--card);width:100%;max-width:440px;border-radius:22px;padding:24px;display:flex;flex-direction:column;gap:14px}
+.card h2{font:600 26px/1.15 var(--display);margin:0;text-wrap:balance}
+.card p{margin:0;color:var(--muted)}
+.card ul{margin:0;padding-left:18px;color:var(--muted);font-size:14px}
+</style>
+</head>
+<body>
+<main>
+  <div class="top">
+    <div>
+      <div class="label">Heart rate · PPG</div>
+      <div class="readout"><span id="bpm" class="idle">--</span><span class="unit">bpm</span><span class="heart" id="heart"></span></div>
+    </div>
+    <video id="v" playsinline webkit-playsinline muted autoplay aria-label="Camera preview"></video>
+  </div>
+  <div class="meter"><i id="progress"></i></div>
+  <canvas id="trace"></canvas>
+  <div class="stats"><span>Signal <b id="q">–</b></span><span>Beats <b id="n">0</b></span><span>Flash <b id="fl">off</b></span><span>FPS <b id="fps">–</b></span></div>
+  <div id="status">Tap Start to allow the camera and flash.</div>
+  <div class="row">
+    <button id="go" type="button">Start</button>
+    <button id="torchBtn" type="button" class="ghost" aria-pressed="false" disabled>Flash</button>
+  </div>
+  <ol class="how">
+    <li>Cover the main rear lens and the flash with one fingertip. The preview circle should glow solid red.</li>
+    <li>Press lightly. Pressing hard flattens the signal.</li>
+    <li>Hold still for about 20 seconds.</li>
+  </ol>
+  <p class="how" style="padding:0">Not a medical device. For curiosity only.</p>
+  <details>
+    <summary>Diagnostics</summary>
+    <pre id="diag">Not started.</pre>
+  </details>
+</main>
+
+<div id="sheet" hidden>
+  <div class="card" role="dialog" aria-labelledby="sheetTitle">
+    <h2 id="sheetTitle">Allow the camera to turn on the flash</h2>
+    <p>Pulse shines the flash through your fingertip and watches the color change with each heartbeat.</p>
+    <ul>
+      <li>iPhone will ask for camera access next. Tap Allow.</li>
+      <li>Video never leaves your phone. Only the average color of each frame is used.</li>
+    </ul>
+    <button id="allow" type="button">Continue</button>
+    <button id="cancel" type="button" class="ghost">Not now</button>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const video=$('v'),trace=$('trace'),ctx=trace.getContext('2d');
+const sample=document.createElement('canvas');sample.width=40;sample.height=30;
+const sctx=sample.getContext('2d',{willReadFrequently:true});
+
+let stream=null,track=null,running=false,torchOn=false,rafId=0;
+let raw=[],filt=[],times=[],beats=[],lastPeak=0,chan='r';
+let frames=0,fpsT=0,lastRGB=[0,0,0];
+const WIN=8000;
+const D={ua:navigator.userAgent,secure:window.isSecureContext,standalone:!!navigator.standalone,cameras:[],tried:[],camera:'',torchCap:'?',torchSet:'?',res:'',error:''};
+
+function setStatus(t,c){const s=$('status');s.textContent=t;s.className=c||''}
+function showDiag(){
+  $('diag').textContent=
+`Secure (https): ${D.secure}   Home Screen app: ${D.standalone}
+Camera in use: ${D.camera||'-'}  ${D.res}
+Torch capability: ${D.torchCap}   Torch setting: ${D.torchSet}
+Cameras found: ${D.cameras.join(' | ')||'-'}
+Torch attempts: ${D.tried.join(' | ')||'-'}
+Frame RGB: ${lastRGB.map(x=>x.toFixed(0)).join(', ')}   Channel: ${chan}
+Last error: ${D.error||'none'}
+${D.ua}`;
+}
+setInterval(showDiag,500);
+
+/* ---------- Permission flow ---------- */
+$('go').addEventListener('click',()=>{
+  if(running){stop();return}
+  if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia){
+    setStatus('The camera needs a secure https:// page opened in Safari.','warn');return;
+  }
+  $('sheet').hidden=false;
+});
+$('cancel').addEventListener('click',()=>{$('sheet').hidden=true});
+$('allow').addEventListener('click',()=>{$('sheet').hidden=true;start()});
+
+/* ---------- Camera ---------- */
+function openCamera(deviceId){
+  const v={width:{ideal:640},height:{ideal:480},frameRate:{ideal:30}};
+  if(deviceId)v.deviceId={exact:deviceId};else v.facingMode={ideal:'environment'};
+  return navigator.mediaDevices.getUserMedia({audio:false,video:v});
+}
+async function attach(s){
+  stream=s;track=s.getVideoTracks()[0];
+  video.srcObject=s;
+  try{await video.play()}catch(e){D.error='play(): '+e.message}
+  // wait until real frames arrive; iOS ignores torch requests made earlier
+  for(let i=0;i<30&&video.readyState<2;i++)await sleep(50);
+  await sleep(250);
+  const st=track.getSettings?track.getSettings():{};
+  D.camera=track.label;D.res=st.width?`${st.width}×${st.height}`:'';
+}
+function release(){
+  if(stream)stream.getTracks().forEach(t=>t.stop());
+  stream=track=null;video.srcObject=null;
+}
+async function tryTorch(t){
+  const caps=t.getCapabilities?t.getCapabilities():{};
+  D.torchCap=String(!!caps.torch);
+  // iOS accepts either form depending on version; try both
+  for(const c of [{advanced:[{torch:true}]},{torch:true}]){
+    try{
+      await t.applyConstraints(c);
+      await sleep(150);
+      const s=t.getSettings?t.getSettings():{};
+      D.torchSet=String(s.torch);
+      if(s.torch===true||caps.torch){D.tried.push(t.label+': ok');return true}
+    }catch(e){D.error='applyConstraints: '+(e.name||'')+' '+e.message}
+  }
+  D.tried.push(t.label+': no');
+  return false;
+}
+
+async function start(){
+  $('go').disabled=true;setStatus('Opening the camera…');
+  D.tried=[];D.error='';
+  try{
+    await attach(await openCamera());
+  }catch(e){
+    $('go').disabled=false;D.error=e.name+': '+e.message;
+    setStatus(e.name==='NotAllowedError'
+      ?'Camera access is blocked. In Safari tap aA › Website Settings › Camera › Allow, then reload.'
+      :'Could not open the camera ('+e.name+').','warn');
+    return;
+  }
+
+  let ok=await tryTorch(track);
+
+  // iPhones expose several rear cameras (wide, ultra wide, dual, triple). Only some can drive the flash.
+  if(!ok){
+    let devs=[];
+    try{devs=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput')}catch(e){}
+    D.cameras=devs.map(d=>d.label||'(unnamed)');
+    const rank=l=>{l=l.toLowerCase();return l==='back camera'?0:l.includes('back')&&!l.includes('ultra')?1:l.includes('back')||l.includes('rear')||l.includes('environment')?2:9};
+    const current=track?.getSettings?.().deviceId;
+    const cands=devs.filter(d=>d.deviceId!==current&&rank(d.label)<9).sort((a,b)=>rank(a.label)-rank(b.label));
+    for(const d of cands){
+      release();
+      try{await attach(await openCamera(d.deviceId))}catch(e){D.error=e.name+': '+e.message;continue}
+      if(await tryTorch(track)){ok=true;break}
+    }
+    if(!track){try{await attach(await openCamera())}catch(e){}}
+  }
+
+  torchOn=ok;updateTorchUI();
+  $('torchBtn').disabled=!ok;
+  if(!track){$('go').disabled=false;setStatus('Could not open the camera.','warn');return}
+  setStatus(ok?'Flash on. Cover the lens and flash with your fingertip.'
+              :'This iPhone did not let the page use the flash. Hold your finger over the lens in front of a bright lamp. Diagnostics below shows why.',ok?'ok':'warn');
+
+  raw=[];filt=[];times=[];beats=[];lastPeak=0;frames=0;fpsT=performance.now();
+  running=true;$('go').disabled=false;$('go').textContent='Stop';
+  requestWakeLock();
+  schedule();
+}
+
+function updateTorchUI(){$('fl').textContent=torchOn?'on':'off';$('torchBtn').setAttribute('aria-pressed',torchOn)}
+$('torchBtn').addEventListener('click',async()=>{
+  if(!track)return;
+  const want=!torchOn;
+  try{await track.applyConstraints({advanced:[{torch:want}]});torchOn=want}catch(e){D.error='toggle: '+e.message}
+  updateTorchUI();
+});
+
+function stop(){
+  running=false;cancelAnimationFrame(rafId);
+  if(track&&torchOn)track.applyConstraints({advanced:[{torch:false}]}).catch(()=>{});
+  release();torchOn=false;updateTorchUI();
+  $('torchBtn').disabled=true;$('go').textContent='Start';releaseWakeLock();
+}
+let lock=null;
+async function requestWakeLock(){try{lock=await navigator.wakeLock?.request('screen')}catch(e){}}
+function releaseWakeLock(){lock?.release().catch(()=>{});lock=null}
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&running)stop()});
+
+/* ---------- Frame loop: one sample per real camera frame where supported ---------- */
+function schedule(){
+  if(!running)return;
+  if(video.requestVideoFrameCallback)video.requestVideoFrameCallback(()=>{onFrame();schedule()});
+  else rafId=requestAnimationFrame(()=>{onFrame();schedule()});
+}
+
+function reset(){raw=[];filt=[];times=[];beats=[];lastPeak=0}
+
+function onFrame(){
+  if(!running||video.readyState<2||!video.videoWidth)return;
+  const now=performance.now();
+  sctx.drawImage(video,0,0,40,30);
+  const d=sctx.getImageData(0,0,40,30).data;
+  let r=0,g=0,b=0;const n=d.length/4;
+  for(let i=0;i<d.length;i+=4){r+=d[i];g+=d[i+1];b+=d[i+2]}
+  r/=n;g/=n;b/=n;lastRGB=[r,g,b];
+  frames++;if(now-fpsT>1000){$('fps').textContent=Math.round(frames*1000/(now-fpsT));frames=0;fpsT=now}
+
+  const finger=r>90&&r>g*1.4&&r>b*1.4;
+  if(!finger){
+    reset();
+    $('bpm').textContent='--';$('bpm').className='idle';$('q').textContent='none';$('progress').style.width='0';
+    setStatus(r<20&&g<20&&b<20?'The camera image is black. Lift your finger slightly, or check Diagnostics.':'No finger detected. Cover the lens and flash fully.','warn');
+    draw();return;
+  }
+  // iPhone auto-exposure often pins red at 255 under the flash, which erases the pulse.
+  // When that happens, switch to the green channel, which still carries it.
+  const want=chan==='r'?(r>242?'g':'r'):(r<228?'r':'g');
+  if(want!==chan){chan=want;reset()}
+  const val=chan==='r'?r:g;
+
+  raw.push(val);times.push(now);
+  const k=Math.min(raw.length,30);
+  let avg=0;for(let i=raw.length-k;i<raw.length;i++)avg+=raw[i];avg/=k;
+  const hp=-(val-avg);
+  const prev=filt.length?filt[filt.length-1]:hp;
+  filt.push(prev+0.45*(hp-prev));
+  while(times.length&&now-times[0]>WIN){times.shift();raw.shift();filt.shift()}
+  detect(now);
+  draw();
+}
+
+function detect(now){
+  const L=filt.length;if(L<5)return;
+  let mn=Infinity,mx=-Infinity;
+  for(const v of filt){if(v<mn)mn=v;if(v>mx)mx=v}
+  const amp=mx-mn,usable=amp>0.15&&amp<30;
+  $('q').textContent=amp<=0.15?'weak':amp>=30?'noisy':'good';
+  const i=L-3,v=filt[i];
+  if(usable&&v>filt[i-1]&&v>=filt[i+1]&&v>filt[i-2]&&v>=filt[i+2]&&v>mn+amp*0.6&&times[i]-lastPeak>300){
+    if(lastPeak){
+      const ibi=times[i]-lastPeak;
+      if(ibi>300&&ibi<1500){beats.push(ibi);if(beats.length>12)beats.shift()}
+    }
+    lastPeak=times[i];
+    const h=$('heart');h.classList.add('beat');setTimeout(()=>h.classList.remove('beat'),120);
+  }
+  $('n').textContent=beats.length;
+  $('progress').style.width=Math.min(100,beats.length/8*100)+'%';
+  if(beats.length>=5){
+    const s=[...beats].sort((a,b)=>a-b),med=s[s.length>>1];
+    const good=beats.filter(x=>Math.abs(x-med)<med*0.2);
+    const bpm=Math.round(60000/(good.reduce((a,b)=>a+b,0)/good.length));
+    $('bpm').textContent=bpm;$('bpm').className='';
+    setStatus(beats.length>=8?'Steady reading. Keep holding to refine it.':'Reading… hold still.','ok');
+  }else setStatus('Finding your pulse… hold still.','ok');
+}
+
+function draw(){
+  const dpr=devicePixelRatio||1,w=trace.clientWidth,h=trace.clientHeight;
+  if(trace.width!==Math.round(w*dpr)){trace.width=Math.round(w*dpr);trace.height=Math.round(h*dpr)}
+  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
+  if(filt.length<2)return;
+  let mn=Infinity,mx=-Infinity;for(const v of filt){if(v<mn)mn=v;if(v>mx)mx=v}
+  const rng=mx-mn||1,t0=times[times.length-1]-WIN;
+  ctx.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+  ctx.lineWidth=2;ctx.lineJoin='round';ctx.beginPath();
+  filt.forEach((v,i)=>{const x=(times[i]-t0)/WIN*w,y=h-8-(v-mn)/rng*(h-16);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});
+  ctx.stroke();
+}
+</script>
+</body>
+</html>
